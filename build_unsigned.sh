@@ -21,7 +21,7 @@ xcodebuild \
   CODE_SIGN_IDENTITY='' \
   archive
 
-APP="$ARCHIVE/Products/Applications/OGIOS.app"
+APP="$ARCHIVE/Products/Applications/SHAFAY EXTERNAL.app"
 test -d "$APP"
 PATCH_DIR="$APP/Patches"
 mkdir -p "$PATCH_DIR"
@@ -30,7 +30,7 @@ for package in "$APP"/*.3105; do
   mv "$package" "$PATCH_DIR/"
 done
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable OGIOS" "$APP/Info.plist" || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable SHAFAY EXTERNAL" "$APP/Info.plist" || true
 /usr/libexec/PlistBuddy -c "Set :CFBundlePackageType APPL" "$APP/Info.plist" || true
 mkdir -p "$BUILD_DIR/Payload"
 cp -R "$APP" "$BUILD_DIR/Payload/"
