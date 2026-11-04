@@ -1,10 +1,11 @@
 import Combine
 import Foundation
 import Security
+import UIKit
 
 @MainActor
 final class LicenseManager: ObservableObject {
-    static let accessKey = "OGIOS"
+    private static let verifyURL = URL(string: "https://shafaykeyauthadmin.lovable.app/api/public/v1/verify-license")!
 
     @Published private(set) var expirationDate: Date?
     @Published private(set) var isActive = false
@@ -13,7 +14,7 @@ final class LicenseManager: ObservableObject {
     @Published private(set) var contactOwner: String?
     @Published var rememberKey = true
 
-    private let service = "com.OGIOS.external-ios.activation"
+    private let service = "com.SHAFAY.EXTERNAL.external-ios.activation"
     private let keyAccount = "license-key"
     private var lastAttemptAt: Date?
 
@@ -21,7 +22,7 @@ final class LicenseManager: ObservableObject {
         isActive = hasRememberedKey
     }
 
-    var hasRememberedKey: Bool { string(for: keyAccount) == Self.accessKey }
+    var hasRememberedKey: Bool { string(for: keyAccount) != nil }
 
     func beginLaunchSession() {
         isActive = hasRememberedKey
@@ -31,25 +32,63 @@ final class LicenseManager: ObservableObject {
     func activate(key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isBusy else { return }
+
         if let lastAttemptAt, Date().timeIntervalSince(lastAttemptAt) < 1 {
             message = "Please wait a moment before trying again"
             return
         }
+
         lastAttemptAt = Date()
         isBusy = true
         message = "Checking access key…"
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.isBusy = false
-            guard trimmed == Self.accessKey else {
-                self.isActive = false
-                self.message = "Invalid access key"
-                return
+        Task {
+            do {
+                let deviceID = UIDevice.current.identifierForVendor?.uuidString ?? "unknown-device"
+                var request = URLRequest(url: Self.verifyURL)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "key": trimmed,
+                    "device_id": deviceID
+                ])
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+
+                struct VerifyResponse: Decodable {
+                    let success: Bool
+                    let valid: Bool
+                    let expires_at: String?
+                }
+
+                let result = try JSONDecoder().decode(VerifyResponse.self, from: data)
+
+                guard result.success, result.valid else {
+                    isActive = false
+                    message = "Invalid or expired access key"
+                    return
+                }
+
+                expirationDate = Self.parseExpiration(result.expires_at)
+
+                if rememberKey {
+                    save(trimmed, for: keyAccount)
+                }
+
+                isActive = true
+                message = "Activated successfully"
+            } catch {
+                isActive = false
+                message = "Unable to verify key. Please try again."
             }
-            if self.rememberKey { self.save(Self.accessKey, for: self.keyAccount) }
-            self.isActive = true
-            self.message = "Activated successfully"
+
+            isBusy = false
         }
     }
 
@@ -63,7 +102,14 @@ final class LicenseManager: ObservableObject {
     func deactivate() {
         delete(keyAccount)
         isActive = false
+        expirationDate = nil
         message = "Activation removed from this device"
+    }
+
+    private static func parseExpiration(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: value)
     }
 
     private func string(for account: String) -> String? {
